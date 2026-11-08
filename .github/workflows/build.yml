@@ -32,7 +32,6 @@ jobs:
       KERNEL_DEVICE: polaris
       DEFCONFIG_NAME: polaris_user_defconfig
       ANYKERNEL_NAME: AnyKernel3
-      CLANG_DIR: ${{ github.workspace }}/google-clang
     steps:
       - name: "⭐ 取本仓库源码"
         uses: actions/checkout@v4
@@ -51,42 +50,37 @@ jobs:
       - name: "⏰ Setup AnyKernel3 (unknownbaka 官方模板)"
         run: git clone --depth=1 https://github.com/unknownbaka/AnyKernel3 $ANYKERNEL_NAME
 
-      - name: "💫 Cache clang-r428724"
+      - name: "💫 Cache clang13 工具链（作者同款）"
         id: cache-clang
         uses: actions/cache@v4
         with:
-          path: ${{ env.CLANG_DIR }}
-          key: clang-r428724-${{ runner.os }}
+          path: ${{ env.WORKSPACE }}/clang13
+          key: clang13-tools-${{ runner.os }}
 
-      - name: "💫 Get toolchain (clang-r428724, clang13 官方同款)"
+      - name: "💫 Get toolchain (diyishengqing/android-kernel-tools clang13)"
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel/clang-r428724.tar.gz"
-          mkdir -p $CLANG_DIR
-          if wget -q -T 300 -O clang.tar.gz "$URL" && tar -xzf clang.tar.gz -C $CLANG_DIR 2>/dev/null && [ -x "$CLANG_DIR/bin/clang" ]; then
-            echo "✅ +archive 下载成功"
-          else
-            echo "⚠️ +archive 失败，回退 git clone..."
-            rm -rf $CLANG_DIR clang-prebuilt
-            git clone --depth=1 -b main-kernel https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang-prebuilt
-            mv clang-prebuilt/clang-r428724 $CLANG_DIR
-            rm -rf clang-prebuilt
-          fi
-          echo "$CLANG_DIR/bin" >> $GITHUB_PATH
-          ls $CLANG_DIR/bin | head -5
+          git clone --recursive --depth=1 -j$(nproc) --branch clang13 https://github.com/diyishengqing/android-kernel-tools $WORKSPACE/clang13
+          echo "$WORKSPACE/clang13/clang/host/linux-x86/clang-r428724/bin" >> $GITHUB_PATH
+          echo "$WORKSPACE/clang13/linaro-gcc-4.9/aarch64-linux-gnu/bin" >> $GITHUB_PATH
+          echo "$WORKSPACE/clang13/linaro-gcc-4.9/arm-linux-gnueabi/bin" >> $GITHUB_PATH
 
       - name: "💫 补 PATH（cache 恢复时也要）"
-        run: echo "$CLANG_DIR/bin" >> $GITHUB_PATH
+        run: |
+          echo "$WORKSPACE/clang13/clang/host/linux-x86/clang-r428724/bin" >> $GITHUB_PATH
+          echo "$WORKSPACE/clang13/linaro-gcc-4.9/aarch64-linux-gnu/bin" >> $GITHUB_PATH
+          echo "$WORKSPACE/clang13/linaro-gcc-4.9/arm-linux-gnueabi/bin" >> $GITHUB_PATH
 
-      - name: "😎 Set build args"
+      - name: "😎 Set build args（作者配方：LD 走 GNU ld，不设 LLD）"
         id: generate-args
         run: |
-          CB=$CLANG_DIR/bin
+          CB=$WORKSPACE/clang13/clang/host/linux-x86/clang-r428724/bin
+          LIN=$WORKSPACE/clang13/linaro-gcc-4.9/aarch64-linux-gnu/bin
+          LIN32=$WORKSPACE/clang13/linaro-gcc-4.9/arm-linux-gnueabi/bin
           args="-j$(nproc --all)"
           args="$args O=$WORKSPACE/out"
           args="$args ARCH=arm64"
           args="$args CC=$CB/clang"
-          args="$args LD=$CB/ld.lld"
           args="$args AR=$CB/llvm-ar"
           args="$args NM=$CB/llvm-nm"
           args="$args STRIP=$CB/llvm-strip"
@@ -98,9 +92,8 @@ jobs:
           args="$args HOSTCXX=$CB/clang++"
           args="$args HOSTAR=$CB/llvm-ar"
 
-          args="$args CLANG_TRIPLE=aarch64-linux-gnu-"
-          args="$args CROSS_COMPILE=aarch64-linux-gnu-"
-          args="$args CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          args="$args CROSS_COMPILE=$LIN/aarch64-linux-gnu-"
+          args="$args CROSS_COMPILE_ARM32=$LIN32/arm-linux-gnueabi-"
           echo "args=$args" >> $GITHUB_OUTPUT
 
       - name: "👍 Make defconfig"
