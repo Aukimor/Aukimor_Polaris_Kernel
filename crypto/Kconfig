@@ -1646,6 +1646,7 @@ config CRYPTO_LZ4HC
 
 config CRYPTO_ZSTD
 	tristate "Zstd compression algorithm"
+	default y
 	select CRYPTO_ALGAPI
 	select CRYPTO_ACOMP2
 	select ZSTD_COMPRESS
