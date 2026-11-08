@@ -1,0 +1,124 @@
+name: Build polaris (staging 官方流)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu:
+        description: '带 KSU root（默认 false=不带，true 则开启）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  Build-Kernel:
+    name: "🐎 Build polaris kernel (staging)"
+    runs-on: ubuntu-22.04
+    env:
+      WORKSPACE: ${{ github.workspace }}
+      KERNEL_NAME: kernel
+      KERNEL_DEVICE: polaris
+      DEFCONFIG_NAME: polaris_user_defconfig
+      ANYKERNEL_NAME: AnyKernel3
+      CLANG_DIR: ${{ github.workspace }}/google-clang
+    steps:
+      - name: "⭐ 取本仓库源码"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: "⭐ Install prerequisites"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc bison flex libssl-dev make git unzip cpio device-tree-compiler python3 xz-utils rsync wget zip zstd gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+      - name: "🏷 源码版本"
+        run: |
+          git log --oneline -3
+
+      - name: "⏰ Setup AnyKernel3 (unknownbaka 官方模板)"
+        run: git clone --depth=1 https://github.com/unknownbaka/AnyKernel3 $ANYKERNEL_NAME
+
+      - name: "💫 Cache clang-r614150"
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CLANG_DIR }}
+          key: clang-r614150-${{ runner.os }}
+
+      - name: "💫 Get toolchain (clang-r614150, +archive 快下)"
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel/clang-r614150.tar.gz"
+          mkdir -p $CLANG_DIR
+          if wget -q -T 300 -O clang.tar.gz "$URL" && tar -xzf clang.tar.gz -C $CLANG_DIR 2>/dev/null && [ -x "$CLANG_DIR/bin/clang" ]; then
+            echo "✅ +archive 下载成功"
+          else
+            echo "⚠️ +archive 失败，回退 git clone..."
+            rm -rf $CLANG_DIR clang-prebuilt
+            git clone --depth=1 -b main-kernel https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang-prebuilt
+            mv clang-prebuilt/clang-r614150 $CLANG_DIR
+            rm -rf clang-prebuilt
+          fi
+          echo "$CLANG_DIR/bin" >> $GITHUB_PATH
+          ls $CLANG_DIR/bin | head -5
+
+      - name: "💫 补 PATH（cache 恢复时也要）"
+        run: echo "$CLANG_DIR/bin" >> $GITHUB_PATH
+
+      - name: "😎 Set build args"
+        id: generate-args
+        run: |
+          CB=$CLANG_DIR/bin
+          args="-j$(nproc --all)"
+          args="$args O=$WORKSPACE/out"
+          args="$args ARCH=arm64"
+          args="$args CC=$CB/clang"
+          args="$args LD=$CB/ld.lld"
+          args="$args AR=$CB/llvm-ar"
+          args="$args NM=$CB/llvm-nm"
+          args="$args STRIP=$CB/llvm-strip"
+          args="$args OBJCOPY=$CB/llvm-objcopy"
+          args="$args OBJDUMP=$CB/llvm-objdump"
+          args="$args OBJSIZE=$CB/llvm-size"
+          args="$args READELF=$CB/llvm-readelf"
+          args="$args HOSTCC=$CB/clang"
+          args="$args HOSTCXX=$CB/clang++"
+          args="$args HOSTAR=$CB/llvm-ar"
+
+          args="$args CLANG_TRIPLE=aarch64-linux-gnu-"
+          args="$args CROSS_COMPILE=aarch64-linux-gnu-"
+          args="$args CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          echo "args=$args" >> $GITHUB_OUTPUT
+
+      - name: "🚫 KSU 检查（defconfig 已写死关闭）"
+        working-directory: ${{ env.WORKSPACE }}
+        run: |
+          rg -n '^CONFIG_KSU.*=y' arch/arm64/configs/polaris_user_defconfig && { echo "KSU 残留 =y 错误"; exit 1; } || echo "全部关闭"
+
+      - name: "👍 Make defconfig"
+        working-directory: ${{ env.WORKSPACE }}
+        run: make ${{ steps.generate-args.outputs.args }} $DEFCONFIG_NAME
+
+      - name: "🎶 Build kernel"
+        working-directory: ${{ env.WORKSPACE }}
+        run: make ${{ steps.generate-args.outputs.args }}
+
+      - name: "💛 Package AnyKernel3"
+        working-directory: ${{ env.ANYKERNEL_NAME }}
+        run: |
+          rm -rf .git
+          cp $WORKSPACE/packaging/anykernel-polaris.sh ./anykernel.sh
+          cp $WORKSPACE/out/arch/arm64/boot/Image.gz-dtb ./Image.gz-dtb
+          zip -r -9 $WORKSPACE/${{ env.KERNEL_DEVICE }}-staging-${{ github.run_id }}.zip .
+
+      - name: "💙 Upload artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: polaris-186
+          path: |
+            ${{ env.WORKSPACE }}/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
