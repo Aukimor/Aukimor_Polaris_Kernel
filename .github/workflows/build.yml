@@ -34,17 +34,17 @@ jobs:
       - name: "⏰ Setup AnyKernel3 (unknownbaka 官方模板)"
         run: git clone --depth=1 https://github.com/unknownbaka/AnyKernel3 $ANYKERNEL_NAME
 
-      - name: "💫 Cache clang-r614150"
+      - name: "💫 Cache clang-r428724"
         id: cache-clang
         uses: actions/cache@v4
         with:
           path: ${{ env.CLANG_DIR }}
-          key: clang-r614150-${{ runner.os }}
+          key: clang-r428724-${{ runner.os }}
 
-      - name: "💫 Get toolchain (clang-r614150, +archive 快下)"
+      - name: "💫 Get toolchain (clang-r428724, clang13 官方同款)"
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel/clang-r614150.tar.gz"
+          URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel/clang-r428724.tar.gz"
           mkdir -p $CLANG_DIR
           if wget -q -T 300 -O clang.tar.gz "$URL" && tar -xzf clang.tar.gz -C $CLANG_DIR 2>/dev/null && [ -x "$CLANG_DIR/bin/clang" ]; then
             echo "✅ +archive 下载成功"
@@ -52,7 +52,7 @@ jobs:
             echo "⚠️ +archive 失败，回退 git clone..."
             rm -rf $CLANG_DIR clang-prebuilt
             git clone --depth=1 -b main-kernel https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang-prebuilt
-            mv clang-prebuilt/clang-r614150 $CLANG_DIR
+            mv clang-prebuilt/clang-r428724 $CLANG_DIR
             rm -rf clang-prebuilt
           fi
           echo "$CLANG_DIR/bin" >> $GITHUB_PATH
