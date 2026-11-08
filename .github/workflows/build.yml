@@ -57,10 +57,10 @@ jobs:
           path: ${{ env.WORKSPACE }}/clang13
           key: clang13-tools-${{ runner.os }}
 
-      - name: "💫 Get toolchain (diyishengqing/android-kernel-tools clang13)"
+      - name: "💫 Get toolchain (Aukimor fork, clang13)"
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          git clone --recursive --depth=1 -j$(nproc) --branch clang13 https://github.com/diyishengqing/android-kernel-tools $WORKSPACE/clang13
+          git clone --recursive --depth=1 -j$(nproc) --branch clang13 https://github.com/Aukimor/android-kernel-tools $WORKSPACE/clang13
           echo "$WORKSPACE/clang13/clang/host/linux-x86/clang-r428724/bin" >> $GITHUB_PATH
           echo "$WORKSPACE/clang13/linaro-gcc-4.9/aarch64-linux-gnu/bin" >> $GITHUB_PATH
           echo "$WORKSPACE/clang13/linaro-gcc-4.9/arm-linux-gnueabi/bin" >> $GITHUB_PATH
