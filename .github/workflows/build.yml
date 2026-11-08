@@ -1,6 +1,23 @@
 name: Build polaris (186 88-zstd 基线)
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'arch/**'
+      - 'block/**'
+      - 'drivers/**'
+      - 'fs/**'
+      - 'include/**'
+      - 'init/**'
+      - 'kernel/**'
+      - 'lib/**'
+      - 'mm/**'
+      - 'net/**'
+      - 'scripts/**'
+      - 'packaging/**'
+      - 'Makefile'
+      - 'Kconfig'
   workflow_dispatch:
 
 permissions:
