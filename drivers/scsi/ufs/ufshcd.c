@@ -1715,6 +1715,10 @@ static void __ufshcd_release(struct ufs_hba *hba, bool no_sched)
 	if (!ufshcd_is_clkgating_allowed(hba))
 		return;
 
+	/* fc55974ee: avoid to call REQ_CLKS_OFF to CLKS_OFF */
+	if (hba->clk_gating.state == CLKS_OFF)
+		return;
+
 	hba->clk_gating.active_reqs--;
 
 	if (hba->clk_gating.active_reqs || hba->clk_gating.is_suspended
