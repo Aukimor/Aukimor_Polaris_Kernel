@@ -1050,9 +1050,10 @@ static int sugov_init(struct cpufreq_policy *policy)
 		tunables->target_load2 = 80;
 	}
 
-	/* screen-off caps default 0 = disabled; enable via sysfs in kHz */
-	tunables->silver_suspend_max_freq = 0;
-	tunables->gold_suspend_max_freq = 0;
+	/* screen-off caps default on — electroutil/LawRun validated values:
+	 * silver 1.32GHz / gold 1.2GHz (big core capped lower, it is the power hog) */
+	tunables->silver_suspend_max_freq = 1324800;
+	tunables->gold_suspend_max_freq = 1209600;
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
