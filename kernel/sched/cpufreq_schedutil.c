@@ -195,17 +195,19 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
 
-	/* helx three-stage: boost on light load, linear mid, ease off high load */
+	/* three-stage around the stock 1.25x base:
+	 * light load: extra boost (snappier), mid: stock 1.25x, heavy: ease off (saving) */
 	{
 		unsigned long load = 100 * util / max;
 		struct sugov_tunables *t = sg_policy->tunables;
+		unsigned long base = freq + (freq >> 2);
 
 		if (load < t->target_load1)
-			freq = (freq + (freq >> t->bit_shift1)) * util / max;
-		else if (load >= t->target_load1 && load < t->target_load2)
-			freq = freq * util / max;
+			freq = (base + (base >> t->bit_shift1)) * util / max;
+		else if (load < t->target_load2)
+			freq = base * util / max;
 		else
-			freq = (freq - (freq >> t->bit_shift2)) * util / max;
+			freq = (base - (base >> t->bit_shift2)) * util / max;
 	}
 	trace_sugov_next_freq(policy->cpu, util, max, freq);
 
@@ -981,17 +983,17 @@ static int sugov_init(struct cpufreq_policy *policy)
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 
-	/* helx three-stage defaults (little/big per cluster, from LawRun helix) */
+	/* three-stage defaults: light=<40% extra boost, mid=stock, heavy=>80% ease */
 	if (cpumask_first(policy->related_cpus) < 4) {
-		tunables->bit_shift1 = 9;
-		tunables->bit_shift2 = 9;
-		tunables->target_load1 = 32;
-		tunables->target_load2 = 73;
+		tunables->bit_shift1 = 6;
+		tunables->bit_shift2 = 8;
+		tunables->target_load1 = 40;
+		tunables->target_load2 = 80;
 	} else {
-		tunables->bit_shift1 = 10;
-		tunables->bit_shift2 = 6;
-		tunables->target_load1 = 24;
-		tunables->target_load2 = 71;
+		tunables->bit_shift1 = 7;
+		tunables->bit_shift2 = 7;
+		tunables->target_load1 = 35;
+		tunables->target_load2 = 80;
 	}
 
 	policy->governor_data = sg_policy;
