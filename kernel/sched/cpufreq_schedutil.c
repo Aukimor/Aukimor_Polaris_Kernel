@@ -713,7 +713,7 @@ static ssize_t bit_shift1_store(struct gov_attr_set *attr_set, const char *buf,
 	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
 	unsigned int val;
 
-	if (kstrtouint(buf, 0, &val))
+	if (kstrtouint(buf, 0, &val) || val < 1 || val > 16)
 		return -EINVAL;
 	tunables->bit_shift1 = val;
 	return count;
@@ -731,7 +731,7 @@ static ssize_t bit_shift2_store(struct gov_attr_set *attr_set, const char *buf,
 	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
 	unsigned int val;
 
-	if (kstrtouint(buf, 0, &val))
+	if (kstrtouint(buf, 0, &val) || val < 1 || val > 16)
 		return -EINVAL;
 	tunables->bit_shift2 = val;
 	return count;
