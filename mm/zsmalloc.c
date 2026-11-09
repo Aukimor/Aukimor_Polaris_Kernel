@@ -52,6 +52,7 @@
 #include <linux/zpool.h>
 #include <linux/mount.h>
 #include <linux/migrate.h>
+#include <linux/wait.h>
 #include <linux/pagemap.h>
 
 #define ZSPAGE_MAGIC	0x58
@@ -266,6 +267,10 @@ struct zs_pool {
 #ifdef CONFIG_COMPACTION
 	struct inode *inode;
 	struct work_struct free_work;
+	/* A wait queue for when migration races with async_free_zspage() */
+	wait_queue_head_t migration_wait;
+	atomic_long_t isolated_pages;
+	bool destroying;
 #endif
 };
 
@@ -1891,6 +1896,20 @@ static enum fullness_group putback_zspage(struct size_class *class,
 }
 
 #ifdef CONFIG_COMPACTION
+static inline void zs_pool_dec_isolated(struct zs_pool *pool)
+{
+	VM_BUG_ON(atomic_long_read(&pool->isolated_pages) <= 0);
+	atomic_long_dec(&pool->isolated_pages);
+	/*
+	 * Checking pool->destroying must happen after atomic_long_dec()
+	 * for pool->isolated_pages above. Paired with the smp_mb() in
+	 * zs_unregister_migration().
+	 */
+	smp_mb__after_atomic();
+	if (atomic_long_read(&pool->isolated_pages) == 0 && pool->destroying)
+		wake_up_all(&pool->migration_wait);
+}
+
 static struct dentry *zs_mount(struct file_system_type *fs_type,
 				int flags, const char *dev_name, void *data)
 {
@@ -2028,6 +2047,7 @@ bool zs_page_isolate(struct page *page, isolate_mode_t mode)
 	 */
 	if (!list_empty(&zspage->list) && !is_zspage_isolated(zspage)) {
 		get_zspage_mapping(zspage, &class_idx, &fullness);
+		atomic_long_inc(&pool->isolated_pages);
 		remove_zspage(class, zspage, fullness);
 	}
 
@@ -2116,8 +2136,16 @@ int zs_page_migrate(struct address_space *mapping, struct page *newpage,
 	 * Page migration is done so let's putback isolated zspage to
 	 * the list if @page is final isolated subpage in the zspage.
 	 */
-	if (!is_zspage_isolated(zspage))
+	if (!is_zspage_isolated(zspage)) {
+		/*
+		 * We cannot race with zs_destroy_pool() here because we wait
+		 * for isolation to hit zero before we start destroying.
+		 * Also, we ensure that everyone can see pool->destroying before
+		 * we start waiting.
+		 */
 		putback_zspage(class, zspage);
+		zs_pool_dec_isolated(pool);
+	}
 
 	reset_page(page);
 	put_page(page);
@@ -2171,6 +2199,7 @@ void zs_page_putback(struct page *page)
 		 */
 		if (fg == ZS_EMPTY)
 			schedule_work(&pool->free_work);
+		zs_pool_dec_isolated(pool);
 	}
 	spin_unlock(&class->lock);
 }
@@ -2194,8 +2223,36 @@ static int zs_register_migration(struct zs_pool *pool)
 	return 0;
 }
 
+static bool pool_isolated_are_drained(struct zs_pool *pool)
+{
+	return atomic_long_read(&pool->isolated_pages) == 0;
+}
+
+/* Function for resolving migration */
+static void wait_for_isolated_drain(struct zs_pool *pool)
+{
+	/*
+	 * We're in the process of destroying the pool, so there are no
+	 * active allocations. zs_page_isolate() fails for completely free
+	 * zspages, so we need only wait for the zs_pool's isolated
+	 * count to hit zero.
+	 */
+	wait_event(pool->migration_wait,
+		   pool_isolated_are_drained(pool));
+}
+
 static void zs_unregister_migration(struct zs_pool *pool)
 {
+	pool->destroying = true;
+	/*
+	 * We need a memory barrier here to ensure global visibility of
+	 * pool->destroying. Thus pool->isolated_pages will either be 0 in which
+	 * case we don't care, or > 0, in which case the decrementing side will
+	 * observe pool->destroying and this barrier pairs with smp_mb__after_atomic()
+	 * in zs_pool_dec_isolated().
+	 */
+	smp_mb();
+	wait_for_isolated_drain(pool);
 	flush_work(&pool->free_work);
 	iput(pool->inode);
 }
@@ -2247,6 +2304,8 @@ static void kick_deferred_free(struct zs_pool *pool)
 static void init_deferred_free(struct zs_pool *pool)
 {
 	INIT_WORK(&pool->free_work, async_free_zspage);
+	init_waitqueue_head(&pool->migration_wait);
+	atomic_long_set(&pool->isolated_pages, 0);
 }
 
 static void SetZsPageMovable(struct zs_pool *pool, struct zspage *zspage)
