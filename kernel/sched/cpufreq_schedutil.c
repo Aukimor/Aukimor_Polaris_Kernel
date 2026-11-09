@@ -29,6 +29,11 @@ struct sugov_tunables {
 	unsigned int hispeed_load;
 	unsigned int hispeed_freq;
 	bool pl;
+	/* helx three-stage tuning (ported, defaults = stock-equivalent) */
+	unsigned int bit_shift1;
+	unsigned int bit_shift2;
+	unsigned int target_load1;
+	unsigned int target_load2;
 };
 
 struct sugov_policy {
@@ -190,7 +195,18 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
 
-	freq = (freq + (freq >> 2)) * util / max;
+	/* helx three-stage: boost on light load, linear mid, ease off high load */
+	{
+		unsigned long load = 100 * util / max;
+		struct sugov_tunables *t = sg_policy->tunables;
+
+		if (load < t->target_load1)
+			freq = (freq + (freq >> t->bit_shift1)) * util / max;
+		else if (load >= t->target_load1 && load < t->target_load2)
+			freq = freq * util / max;
+		else
+			freq = (freq - (freq >> t->bit_shift2)) * util / max;
+	}
 	trace_sugov_next_freq(policy->cpu, util, max, freq);
 
 	if (freq == sg_policy->cached_raw_freq
@@ -683,6 +699,82 @@ static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
 static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
 static struct governor_attr hispeed_load = __ATTR_RW(hispeed_load);
 static struct governor_attr hispeed_freq = __ATTR_RW(hispeed_freq);
+static ssize_t bit_shift1_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	return sprintf(buf, "%u\n", tunables->bit_shift1);
+}
+
+static ssize_t bit_shift1_store(struct gov_attr_set *attr_set, const char *buf,
+				size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int val;
+
+	if (kstrtouint(buf, 0, &val))
+		return -EINVAL;
+	tunables->bit_shift1 = val;
+	return count;
+}
+
+static ssize_t bit_shift2_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	return sprintf(buf, "%u\n", tunables->bit_shift2);
+}
+
+static ssize_t bit_shift2_store(struct gov_attr_set *attr_set, const char *buf,
+				size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int val;
+
+	if (kstrtouint(buf, 0, &val))
+		return -EINVAL;
+	tunables->bit_shift2 = val;
+	return count;
+}
+
+static ssize_t target_load1_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	return sprintf(buf, "%u\n", tunables->target_load1);
+}
+
+static ssize_t target_load1_store(struct gov_attr_set *attr_set, const char *buf,
+				  size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int val;
+
+	if (kstrtouint(buf, 0, &val) || val > 100)
+		return -EINVAL;
+	tunables->target_load1 = val;
+	return count;
+}
+
+static ssize_t target_load2_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	return sprintf(buf, "%u\n", tunables->target_load2);
+}
+
+static ssize_t target_load2_store(struct gov_attr_set *attr_set, const char *buf,
+				  size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int val;
+
+	if (kstrtouint(buf, 0, &val) || val > 100)
+		return -EINVAL;
+	tunables->target_load2 = val;
+	return count;
+}
+
+static struct governor_attr bit_shift1 = __ATTR_RW(bit_shift1);
+static struct governor_attr bit_shift2 = __ATTR_RW(bit_shift2);
+static struct governor_attr target_load1 = __ATTR_RW(target_load1);
+static struct governor_attr target_load2 = __ATTR_RW(target_load2);
 static struct governor_attr pl = __ATTR_RW(pl);
 
 static struct attribute *sugov_attributes[] = {
@@ -690,6 +782,10 @@ static struct attribute *sugov_attributes[] = {
 	&down_rate_limit_us.attr,
 	&hispeed_load.attr,
 	&hispeed_freq.attr,
+	&bit_shift1.attr,
+	&bit_shift2.attr,
+	&target_load1.attr,
+	&target_load2.attr,
 	&pl.attr,
 	NULL
 };
@@ -884,6 +980,19 @@ static int sugov_init(struct cpufreq_policy *policy)
 	tunables->down_rate_limit_us = 0;
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
+
+	/* helx three-stage defaults (little/big per cluster, from LawRun helix) */
+	if (cpumask_first(policy->related_cpus) < 4) {
+		tunables->bit_shift1 = 9;
+		tunables->bit_shift2 = 9;
+		tunables->target_load1 = 32;
+		tunables->target_load2 = 73;
+	} else {
+		tunables->bit_shift1 = 10;
+		tunables->bit_shift2 = 6;
+		tunables->target_load1 = 24;
+		tunables->target_load2 = 71;
+	}
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
