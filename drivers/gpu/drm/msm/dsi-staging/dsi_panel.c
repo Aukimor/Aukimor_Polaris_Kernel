@@ -15,6 +15,7 @@
 
 #define pr_fmt(fmt)	"msm-dsi-panel:[%s:%d] " fmt, __func__, __LINE__
 #include <linux/delay.h>
+#include <linux/display_state.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
@@ -76,6 +77,14 @@
 #define DAY_SECS (60*60*24)
 
 static struct dsi_panel *g_panel;
+
+bool display_on = true;
+
+bool is_display_on(void)
+{
+	return display_on;
+}
+
 static int panel_disp_param_send_lock(struct dsi_panel *panel, int param);
 int dsi_display_read_panel(struct dsi_panel *panel, struct dsi_read_config *read_config);
 
@@ -5279,6 +5288,8 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	if (panel->type == EXT_BRIDGE)
 		return 0;
 
+	display_on = true;
+
 	mutex_lock(&panel->panel_lock);
 
 	tf8719_on_cmd_add_60ms_delay(panel, DSI_CMD_SET_ON);
@@ -5365,6 +5376,8 @@ int dsi_panel_disable(struct dsi_panel *panel)
 
 	if (panel->type == EXT_BRIDGE)
 		return 0;
+
+	display_on = false;
 
 	mutex_lock(&panel->panel_lock);
 

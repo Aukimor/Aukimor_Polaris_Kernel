@@ -13,6 +13,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/cpufreq.h>
+#include <linux/display_state.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
 #include <trace/events/power.h>
@@ -34,6 +35,9 @@ struct sugov_tunables {
 	unsigned int bit_shift2;
 	unsigned int target_load1;
 	unsigned int target_load2;
+	/* screen-off per-cluster frequency caps (kHz, 0 = no cap) */
+	unsigned int silver_suspend_max_freq;
+	unsigned int gold_suspend_max_freq;
 };
 
 struct sugov_policy {
@@ -208,6 +212,16 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 			freq = base * util / max;
 		else
 			freq = (base - (base >> t->bit_shift2)) * util / max;
+	}
+
+	/* screen-off cap: limit per-cluster max freq while display is off */
+	if (!is_display_on()) {
+		struct sugov_tunables *t = sg_policy->tunables;
+		unsigned int cap = cpumask_first(policy->related_cpus) < 4 ?
+			t->silver_suspend_max_freq : t->gold_suspend_max_freq;
+
+		if (cap && freq > cap)
+			freq = cap;
 	}
 	trace_sugov_next_freq(policy->cpu, util, max, freq);
 
@@ -773,10 +787,48 @@ static ssize_t target_load2_store(struct gov_attr_set *attr_set, const char *buf
 	return count;
 }
 
+static ssize_t silver_suspend_max_freq_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	return sprintf(buf, "%u\n", tunables->silver_suspend_max_freq);
+}
+
+static ssize_t silver_suspend_max_freq_store(struct gov_attr_set *attr_set,
+					     const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int val;
+
+	if (kstrtouint(buf, 0, &val))
+		return -EINVAL;
+	tunables->silver_suspend_max_freq = val;
+	return count;
+}
+
+static ssize_t gold_suspend_max_freq_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	return sprintf(buf, "%u\n", tunables->gold_suspend_max_freq);
+}
+
+static ssize_t gold_suspend_max_freq_store(struct gov_attr_set *attr_set,
+					   const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int val;
+
+	if (kstrtouint(buf, 0, &val))
+		return -EINVAL;
+	tunables->gold_suspend_max_freq = val;
+	return count;
+}
+
 static struct governor_attr bit_shift1 = __ATTR_RW(bit_shift1);
 static struct governor_attr bit_shift2 = __ATTR_RW(bit_shift2);
 static struct governor_attr target_load1 = __ATTR_RW(target_load1);
 static struct governor_attr target_load2 = __ATTR_RW(target_load2);
+static struct governor_attr silver_suspend_max_freq = __ATTR_RW(silver_suspend_max_freq);
+static struct governor_attr gold_suspend_max_freq = __ATTR_RW(gold_suspend_max_freq);
 static struct governor_attr pl = __ATTR_RW(pl);
 
 static struct attribute *sugov_attributes[] = {
@@ -788,6 +840,8 @@ static struct attribute *sugov_attributes[] = {
 	&bit_shift2.attr,
 	&target_load1.attr,
 	&target_load2.attr,
+	&silver_suspend_max_freq.attr,
+	&gold_suspend_max_freq.attr,
 	&pl.attr,
 	NULL
 };
@@ -995,6 +1049,10 @@ static int sugov_init(struct cpufreq_policy *policy)
 		tunables->target_load1 = 35;
 		tunables->target_load2 = 80;
 	}
+
+	/* screen-off caps default 0 = disabled; enable via sysfs in kHz */
+	tunables->silver_suspend_max_freq = 0;
+	tunables->gold_suspend_max_freq = 0;
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
