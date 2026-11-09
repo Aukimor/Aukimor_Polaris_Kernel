@@ -78,11 +78,11 @@
 
 static struct dsi_panel *g_panel;
 
-bool display_on = true;
+static bool display_on = true;
 
 bool is_display_on(void)
 {
-	return display_on;
+	return READ_ONCE(display_on);
 }
 
 static int panel_disp_param_send_lock(struct dsi_panel *panel, int param);
@@ -5288,7 +5288,7 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	if (panel->type == EXT_BRIDGE)
 		return 0;
 
-	display_on = true;
+	WRITE_ONCE(display_on, true);
 
 	mutex_lock(&panel->panel_lock);
 
@@ -5377,7 +5377,7 @@ int dsi_panel_disable(struct dsi_panel *panel)
 	if (panel->type == EXT_BRIDGE)
 		return 0;
 
-	display_on = false;
+	WRITE_ONCE(display_on, false);
 
 	mutex_lock(&panel->panel_lock);
 
