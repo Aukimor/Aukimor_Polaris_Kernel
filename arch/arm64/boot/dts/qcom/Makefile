@@ -58,6 +58,7 @@ perseus-p2-v2.1-overlay.dtbo-base := sdm845-v2.1.dtb
 perseus-p3-v2.1-overlay.dtbo-base := sdm845-v2.1.dtb
 perseus-mp-v2.1-overlay.dtbo-base := sdm845-v2.1.dtb
 
+else
 	dtb-$(CONFIG_ARCH_SDM845) += polaris-mp-v2.1.dtb
 
 endif
